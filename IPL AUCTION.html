@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>IPL MEGA AUCTION PRO</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        .bid-flash { animation: flash 0.3s ease-out; }
+        @keyframes flash { 0% { background-color: #fef08a; } 100% { background-color: white; } }
+        #squad-list::-webkit-scrollbar { width: 4px; }
+        #squad-list::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
+        .paused { opacity: 0.5; pointer-events: none; }
+        #timer.time-added { color: #22c55e; transform: scale(1.2); transition: 0.2s; }
+        .btn-disabled { background-color: #1e293b !important; color: #475569 !important; cursor: not-allowed; border-bottom: none !important; }
+        
+        /* Sold Animation */
+        .sold-text { animation: stamp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        @keyframes stamp {
+            0% { transform: scale(8); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-white font-sans overflow-x-hidden">
+
+<div id="lobby" class="flex items-center justify-center min-h-screen p-6">
+    <div class="bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl border border-slate-800 w-full max-w-lg text-center">
+        <h1 class="text-4xl font-black italic text-yellow-500 mb-2 uppercase tracking-tighter">IPL Auction</h1>
+        <p class="text-slate-500 text-[10px] uppercase font-bold tracking-widest mb-8">Multiplayer & Smart AI Owners</p>
+        
+        <div id="user-inputs">
+            <input id="userName" type="text" placeholder="Manager Name" class="w-full p-4 rounded-xl bg-slate-800 text-white mb-4 outline-none border-2 border-transparent focus:border-yellow-500 transition-all">
+            
+            <select id="userTeam" class="w-full p-4 rounded-xl bg-slate-800 text-white mb-8 outline-none border-2 border-transparent focus:border-yellow-500">
+                <option value="">-- Choose Your Franchise --</option>
+                <option>CSK</option><option>MI</option><option>RCB</option><option>KKR</option>
+                <option>SRH</option><option>DC</option><option>RR</option><option>LSG</option>
+                <option>GT</option><option>PBKS</option>
+            </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 mb-4">
+            <button onclick="setupPeer('HOST')" class="bg-yellow-500 text-black font-black py-4 rounded-2xl hover:bg-yellow-400 transform active:scale-95 transition-all uppercase text-sm">Create Room</button>
+            <button onclick="setupPeer('JOIN')" class="bg-blue-600 text-white font-black py-4 rounded-2xl hover:bg-blue-500 transform active:scale-95 transition-all uppercase text-sm">Join Room</button>
+        </div>
+        <button onclick="setupPeer('DISPLAY')" class="w-full bg-slate-700 text-white font-black py-4 rounded-2xl hover:bg-slate-600 transform active:scale-95 transition-all uppercase tracking-widest text-sm mb-4">Add Display</button>
+
+        <div id="status-box" class="hidden mt-8 p-6 bg-black rounded-3xl border border-dashed border-slate-700">
+            <p class="text-[10px] text-slate-500 font-bold mb-1 uppercase tracking-widest">Joining Code:</p>
+            <p id="my-id" class="text-2xl font-mono font-bold text-yellow-400 select-all mb-6 tracking-widest">---</p>
+            
+            <div id="host-action-area" class="hidden">
+                <button id="start-btn" onclick="sendStart()" class="w-full bg-green-600 hover:bg-green-500 text-white font-black py-5 rounded-2xl shadow-xl uppercase tracking-widest text-lg border-b-4 border-green-800 active:border-b-0 active:translate-y-1 transition-all mb-4">
+                    Start Auction
+                </button>
+            </div>
+
+            <div id="conn-state" class="text-[10px] text-slate-400 uppercase font-bold">Waiting for participants...</div>
+        </div>
+    </div>
+</div>
+
+<div id="sold-overlay" class="hidden fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center text-center p-10">
+    <h1 class="sold-text text-red-600 text-9xl font-black italic uppercase tracking-tighter mb-4">SOLD</h1>
+    <p id="sold-player-name" class="text-6xl font-bold text-white mb-4 uppercase italic"></p>
+    <div class="h-1 w-64 bg-yellow-500 mb-6"></div>
+    <p id="sold-details" class="text-5xl text-yellow-500 font-mono font-black"></p>
+</div>
+
+<div id="hall" class="hidden max-w-2xl mx-auto p-4 py-8">
+    <div class="grid grid-cols-2 gap-4 mb-6">
+        <div class="bg-slate-900 p-6 rounded-3xl border border-slate-800">
+            <p id="my-team-display" class="text-yellow-500 font-black italic text-2xl uppercase leading-none mb-1"></p>
+            <p id="purse-display" class="text-green-400 font-mono font-bold text-lg">₹<span id="purse">120.0</span> Cr</p>
+        </div>
+        <div class="bg-slate-900 p-6 rounded-3xl border border-slate-800 text-right relative">
+            <p id="timer" class="text-4xl font-black text-red-500 italic font-mono leading-none mb-1">20</p>
+            <p id="progress" class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Player 1 / 250</p>
+            <div id="pause-indicator" class="hidden absolute inset-0 bg-black/80 rounded-3xl flex items-center justify-center text-yellow-500 font-bold italic uppercase">PAUSED</div>
+        </div>
+    </div>
+
+    <div id="host-controls" class="hidden grid grid-cols-2 gap-2 mb-4">
+        <button onclick="togglePause(true)" class="bg-slate-800 hover:bg-slate-700 py-2 rounded-xl text-xs font-bold uppercase">Pause</button>
+        <button onclick="togglePause(false)" class="bg-slate-800 hover:bg-slate-700 py-2 rounded-xl text-xs font-bold uppercase">Resume</button>
+    </div>
+
+    <div id="player-card" class="bg-white text-slate-950 rounded-[3rem] overflow-hidden shadow-2xl relative mb-8">
+        <div class="p-12 text-center">
+            <span id="p-role" class="bg-blue-100 text-blue-700 px-4 py-1 rounded-full font-black text-[10px] uppercase mb-4 inline-block tracking-widest"></span>
+            <h2 id="p-name" class="text-5xl font-black uppercase leading-tight italic mb-10 tracking-tighter"></h2>
+            
+            <div class="grid grid-cols-2 gap-6 bg-slate-50 p-8 rounded-[2rem] border border-slate-200">
+                <div class="text-left border-r border-slate-200">
+                    <p class="text-slate-400 font-bold uppercase text-[10px]">Current Bid</p>
+                    <p class="text-4xl font-black italic">₹<span id="bid">0.0</span></p>
+                </div>
+                <div class="text-right">
+                    <p class="text-slate-400 font-bold uppercase text-[10px]">Highest Bidder</p>
+                    <p id="bidder" class="text-2xl font-black text-blue-900 italic uppercase">NONE</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button id="bid-btn" onclick="sendBid()" class="w-full bg-blue-600 hover:bg-blue-500 py-8 rounded-[2.5rem] font-black text-6xl shadow-xl transition-all border-b-[10px] border-blue-900 uppercase italic mb-10 active:scale-95">BID</button>
+
+    <div id="export-area" class="bg-slate-900 p-8 rounded-[2.5rem] border border-slate-800">
+        <div class="flex justify-between items-center mb-6">
+            <h3 class="font-black text-yellow-500 text-2xl italic uppercase tracking-tighter">Official Squad</h3>
+            <button onclick="saveSquad()" class="bg-green-600 hover:bg-green-500 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all">Save Squad</button>
+        </div>
+        <div id="squad-list" class="grid grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-2"></div>
+    </div>
+</div>
+
+<script>
+// Hammer Sound Logic
+const hammerAudio = new Audio('https://www.soundjay.com/buttons/button-10.mp3'); 
+
+function playHammer() {
+    hammerAudio.currentTime = 0;
+    hammerAudio.play().catch(e => console.log("Audio play blocked until user interaction"));
+}
+
+const fullPlayers = [
+    { name: "MS Dhoni", role: "Wicketkeeper", isStar: true }, { name: "Rohit Sharma", role: "Batsman", isStar: true }, { name: "Virat Kohli", role: "Batsman", isStar: true }, { name: "Suresh Raina", role: "Batsman", isStar: false }, { name: "Rishabh Pant", role: "Wicketkeeper", isStar: true }, { name: "KL Rahul", role: "Wicketkeeper", isStar: true }, { name: "Shikhar Dhawan", role: "Batsman", isStar: false }, { name: "David Warner", role: "Batsman", isStar: true }, { name: "Andre Russell", role: "All-Rounder", isStar: true }, { name: "Dinesh Karthik", role: "Wicketkeeper", isStar: false }, { name: "AB de Villiers", role: "Batsman", isStar: true }, { name: "Chris Gayle", role: "Batsman", isStar: true }, { name: "Jos Buttler", role: "Wicketkeeper", isStar: true }, { name: "Hardik Pandya", role: "All-Rounder", isStar: true }, { name: "Ravindra Jadeja", role: "All-Rounder", isStar: true }, { name: "Sunil Narine", role: "All-Rounder", isStar: true }, { name: "Rashid Khan", role: "Bowler", isStar: true }, { name: "Shreyas Iyer", role: "Batsman", isStar: true }, { name: "Pat Cummins", role: "Bowler", isStar: true }, { name: "Ben Stokes", role: "All-Rounder", isStar: true }, { name: "Trent Boult", role: "Bowler", isStar: true }, { name: "Bhuvneshwar Kumar", role: "Bowler", isStar: false }, { name: "Jasprit Bumrah", role: "Bowler", isStar: true }, { name: "Mohammed Shami", role: "Bowler", isStar: true }, { name: "Yuzvendra Chahal", role: "Bowler", isStar: true }, { name: "Suryakumar Yadav", role: "Batsman", isStar: true }, { name: "Ishan Kishan", role: "Wicketkeeper", isStar: true }, { name: "Shubman Gill", role: "Batsman", isStar: true }, { name: "Sanju Samson", role: "Wicketkeeper", isStar: true }, { name: "Prithvi Shaw", role: "Batsman", isStar: false }, { name: "Mayank Agarwal", role: "Batsman", isStar: false }, { name: "Ajinkya Rahane", role: "Batsman", isStar: false }, { name: "Manish Pandey", role: "Batsman", isStar: false }, { name: "Devdutt Padikkal", role: "Batsman", isStar: false }, { name: "Venkatesh Iyer", role: "All-Rounder", isStar: false }, { name: "Rahul Tewatia", role: "All-Rounder", isStar: false }, { name: "Deepak Hooda", role: "All-Rounder", isStar: false }, { name: "Shahrukh Khan", role: "Batsman", isStar: false }, { name: "Tilak Varma", role: "Batsman", isStar: false }, { name: "Rinku Singh", role: "Batsman", isStar: false }, { name: "Yashasvi Jaiswal", role: "Batsman", isStar: true }, { name: "Rajat Patidar", role: "Batsman", isStar: false }, { name: "Abhishek Sharma", role: "All-Rounder", isStar: false }, { name: "Aiden Markram", role: "Batsman", isStar: true }, { name: "Faf du Plessis", role: "Batsman", isStar: true }, { name: "Glenn Maxwell", role: "All-Rounder", isStar: true }, { name: "Marcus Stoinis", role: "All-Rounder", isStar: true }, { name: "Moeen Ali", role: "All-Rounder", isStar: true }, { name: "Liam Livingstone", role: "All-Rounder", isStar: true }, { name: "Kieron Pollard", role: "All-Rounder", isStar: false }, { name: "Nicholas Pooran", role: "Wicketkeeper", isStar: true }, { name: "Quinton de Kock", role: "Wicketkeeper", isStar: true }, { name: "Devon Conway", role: "Batsman", isStar: true }, { name: "Jason Roy", role: "Batsman", isStar: false }, { name: "Martin Guptill", role: "Batsman", isStar: false }, { name: "David Miller", role: "Batsman", isStar: true }, { name: "Rassie van der Dussen", role: "Batsman", isStar: false }, { name: "Daryl Mitchell", role: "All-Rounder", isStar: false }, { name: "Jason Holder", role: "All-Rounder", isStar: false }, { name: "James Neesham", role: "All-Rounder", isStar: false }, { name: "Wanindu Hasaranga", role: "All-Rounder", isStar: true }, { name: "Mohammad Nabi", role: "All-Rounder", isStar: false }, { name: "Marco Jansen", role: "All-Rounder", isStar: false }, { name: "Mitchell Marsh", role: "All-Rounder", isStar: true }, { name: "Sam Curran", role: "All-Rounder", isStar: true }, { name: "Chris Woakes", role: "All-Rounder", isStar: false }, { name: "Mitchell Starc", role: "Bowler", isStar: true }, { name: "Josh Hazlewood", role: "Bowler", isStar: true }, { name: "Lockie Ferguson", role: "Bowler", isStar: true }, { name: "Jhye Richardson", role: "Bowler", isStar: false }, { name: "Adam Zampa", role: "Bowler", isStar: true }, { name: "Tabraiz Shamsi", role: "Bowler", isStar: false }, { name: "Maheesh Theekshana", role: "Bowler", isStar: true }, { name: "Varun Chakravarthy", role: "Bowler", isStar: true }, { name: "Kuldeep Yadav", role: "Bowler", isStar: true }, { name: "Ravi Bishnoi", role: "Bowler", isStar: true }, { name: "Rahul Chahar", role: "Bowler", isStar: false }, { name: "Deepak Chahar", role: "Bowler", isStar: false }, { name: "Avesh Khan", role: "Bowler", isStar: true }, { name: "Arshdeep Singh", role: "Bowler", isStar: true }, { name: "Prasidh Krishna", role: "Bowler", isStar: false }, { name: "T Natarajan", role: "Bowler", isStar: false }, { name: "Harshal Patel", role: "Bowler", isStar: false }, { name: "Umesh Yadav", role: "Bowler", isStar: false }, { name: "Ishant Sharma", role: "Bowler", isStar: false }, { name: "Mohit Sharma", role: "Bowler", isStar: false }, { name: "Shardul Thakur", role: "Bowler", isStar: false }, { name: "Jaydev Unadkat", role: "Bowler", isStar: false }, { name: "Sandeep Sharma", role: "Bowler", isStar: false }, { name: "Anrich Nortje", role: "Bowler", isStar: true }, { name: "Kagiso Rabada", role: "Bowler", isStar: true }, { name: "Lungi Ngidi", role: "Bowler", isStar: false }, { name: "Alzarri Joseph", role: "Bowler", isStar: false }, { name: "Obed McCoy", role: "Bowler", isStar: false }, { name: "Mustafizur Rahman", role: "Bowler", isStar: false }, { name: "Tim Southee", role: "Bowler", isStar: false }, { name: "Nathan Coulter-Nile", role: "Bowler", isStar: false }, { name: "Reece Topley", role: "Bowler", isStar: false }, { name: "Kyle Jamieson", role: "Bowler", isStar: false }, { name: "Basil Thampi", role: "Bowler", isStar: false }, { name: "Chetan Sakariya", role: "Bowler", isStar: false }, { name: "Shivam Mavi", role: "Bowler", isStar: false }, { name: "Umran Malik", role: "Bowler", isStar: false }, { name: "Yash Dayal", role: "Bowler", isStar: false }, { name: "Mukesh Kumar", role: "Bowler", isStar: false }, { name: "Akash Deep", role: "Bowler", isStar: false }, { name: "Navdeep Saini", role: "Bowler", isStar: false }, { name: "Khaleel Ahmed", role: "Bowler", isStar: false }, { name: "Kartik Tyagi", role: "Bowler", isStar: false }, { name: "Siddarth Kaul", role: "Bowler", isStar: false }, { name: "Anukul Roy", role: "All-Rounder", isStar: false }, { name: "Washington Sundar", role: "All-Rounder", isStar: false }, { name: "Axar Patel", role: "All-Rounder", isStar: true }, { name: "Shahbaz Ahmed", role: "All-Rounder", isStar: false }, { name: "Nitish Rana", role: "All-Rounder", isStar: false }, { name: "Krunal Pandya", role: "All-Rounder", isStar: false }, { name: "Harpreet Brar", role: "All-Rounder", isStar: false }, { name: "Shivam Dube", role: "All-Rounder", isStar: true }, { name: "Abdul Samad", role: "Batsman", isStar: false }, { name: "Ayush Badoni", role: "Batsman", isStar: false }, { name: "Nehal Wadhera", role: "Batsman", isStar: false }, { name: "Priyam Garg", role: "Batsman", isStar: false }, { name: "Rahul Tripathi", role: "Batsman", isStar: false }, { name: "Karun Nair", role: "Batsman", isStar: false }, { name: "Hanuma Vihari", role: "Batsman", isStar: false }, { name: "Cheteshwar Pujara", role: "Batsman", isStar: false }, { name: "Sarfaraz Khan", role: "Batsman", isStar: false }, { name: "KS Bharat", role: "Wicketkeeper", isStar: false }, { name: "Wriddhiman Saha", role: "Wicketkeeper", isStar: false }, { name: "Jonny Bairstow", role: "Wicketkeeper", isStar: true }, { name: "Phil Salt", role: "Wicketkeeper", isStar: true }, { name: "Matthew Wade", role: "Wicketkeeper", isStar: false }, { name: "Heinrich Klaasen", role: "Wicketkeeper", isStar: true }, { name: "Alex Carey", role: "Wicketkeeper", isStar: false }, { name: "Tim Seifert", role: "Wicketkeeper", isStar: false }, { name: "Kusal Mendis", role: "Wicketkeeper", isStar: false }, { name: "Niroshan Dickwella", role: "Wicketkeeper", isStar: false }, { name: "Paul Stirling", role: "Batsman", isStar: false }, { name: "Harry Brook", role: "Batsman", isStar: true }, { name: "Dawid Malan", role: "Batsman", isStar: false }, { name: "Joe Root", role: "Batsman", isStar: false }, { name: "Steve Smith", role: "Batsman", isStar: false }, { name: "Kane Williamson", role: "Batsman", isStar: true }
+];
+
+let peer, conn, role;
+let isPaused = false;
+let isDisplayMode = false;
+const allTeams = ["CSK", "MI", "RCB", "KKR", "SRH", "DC", "RR", "LSG", "GT", "PBKS"];
+
+let state = { 
+    idx: 0, bid: 0, bidder: "None", purse: 120.0, team: "", name: "", timer: 20, squad: []
+};
+
+function setupPeer(mode) {
+    role = mode;
+    isDisplayMode = (mode === 'DISPLAY');
+    
+    if(!isDisplayMode) {
+        state.team = document.getElementById('userTeam').value;
+        state.name = document.getElementById('userName').value;
+        if(!state.team || !state.name) return alert("Enter Name and Select Franchise!");
+    } else {
+        state.team = "DISPLAY";
+        state.name = "Public Screen";
+    }
+    
+    document.getElementById('status-box').classList.remove('hidden');
+    if(mode === 'HOST') document.getElementById('host-action-area').classList.remove('hidden');
+
+    peer = new Peer();
+    peer.on('open', (id) => {
+        document.getElementById('my-id').innerText = id;
+        if(mode === 'JOIN' || mode === 'DISPLAY') {
+            const hostId = prompt("Enter Joining Code from Host:");
+            if(hostId) { 
+                conn = peer.connect(hostId); 
+                conn.on('open', () => conn.send({ type: 'HANDSHAKE', team: state.team, isDisplay: isDisplayMode }));
+                initConn(); 
+            }
+        }
+    });
+
+    peer.on('connection', (c) => {
+        conn = c;
+        document.getElementById('conn-state').innerText = "PARTNER CONNECTED!";
+        document.getElementById('conn-state').style.color = "#22c55e";
+        initConn();
+    });
+}
+
+function initConn() {
+    conn.on('data', (data) => {
+        if(data.type === 'HANDSHAKE') {
+            if(role === 'HOST') conn.send({ type: 'HANDSHAKE', team: state.team });
+        }
+        if(data.type === 'START') startGame();
+        if(data.type === 'BID') {
+            state.bid = data.bid;
+            state.bidder = data.bidder;
+            state.timer = data.newTime;
+            updateUI();
+            flash();
+            showExtension();
+        }
+        if(data.type === 'TICK') {
+            state.timer = data.time;
+            document.getElementById('timer').innerText = state.timer;
+        }
+        if(data.type === 'PAUSE') {
+            isPaused = data.value;
+            updatePauseUI();
+        }
+        if(data.type === 'RESOLVE') finalizePlayer(data.soldTo, data.price);
+    });
+}
+
+function sendStart() {
+    if(conn && conn.open) conn.send({ type: 'START' });
+    startGame();
+}
+
+function startGame() {
+    document.getElementById('lobby').classList.add('hidden');
+    document.getElementById('hall').classList.remove('hidden');
+    
+    if(isDisplayMode) {
+        document.getElementById('bid-btn').classList.add('hidden');
+        document.getElementById('export-area').classList.add('hidden');
+        document.getElementById('purse-display').classList.add('hidden');
+        document.getElementById('my-team-display').innerText = "IPL MEGA AUCTION";
+    } else {
+        document.getElementById('my-team-display').innerText = `${state.name} (${state.team})`;
+    }
+
+    if(role === 'HOST') {
+        document.getElementById('host-controls').classList.remove('hidden');
+        startMasterClock();
+    }
+    updateUI();
+}
+
+function togglePause(val) {
+    isPaused = val;
+    if(conn && conn.open) conn.send({ type: 'PAUSE', value: val });
+    updatePauseUI();
+}
+
+function updatePauseUI() {
+    document.getElementById('pause-indicator').style.display = isPaused ? 'flex' : 'none';
+}
+
+function startMasterClock() {
+    setInterval(() => {
+        if(state.timer > 0 && !isPaused) {
+            state.timer--;
+            document.getElementById('timer').innerText = state.timer;
+            if(conn && conn.open) conn.send({ type: 'TICK', time: state.timer });
+            
+            const p = fullPlayers[state.idx];
+            const valuation = p.isStar ? 22.5 : 9.5;
+            const aiAggression = p.isStar ? 0.40 : 0.12;
+
+            if(state.bidder !== state.team && Math.random() < aiAggression && state.bid < valuation) {
+                const aiTeams = allTeams.filter(t => t !== state.team);
+                triggerAIBid(aiTeams[Math.floor(Math.random() * aiTeams.length)]);
+            }
+
+            if(state.timer === 0) {
+                const winner = state.bidder;
+                if(conn && conn.open) conn.send({ type: 'RESOLVE', soldTo: winner, price: state.bid });
+                finalizePlayer(winner, state.bid);
+            }
+        }
+    }, 1000);
+}
+
+function triggerAIBid(aiTeam) {
+    setTimeout(() => {
+        if(isPaused || state.bidder === aiTeam) return; 
+        state.bid += 0.5;
+        state.bidder = aiTeam;
+        state.timer = Math.min(state.timer + 3, 20); 
+        if(conn && conn.open) conn.send({ type: 'BID', bid: state.bid, bidder: aiTeam, newTime: state.timer });
+        updateUI();
+        flash();
+        showExtension();
+    }, 400 + Math.random() * 1000);
+}
+
+function sendBid() {
+    if(isPaused || state.bidder === state.team) return;
+    if(state.purse < (state.bid + 0.5)) return alert("Purse exhausted!");
+    
+    state.bid += 0.5;
+    state.bidder = state.team;
+    state.timer = Math.min(state.timer + 3, 20);
+    if(conn && conn.open) conn.send({ type: 'BID', bid: state.bid, bidder: state.team, newTime: state.timer });
+    updateUI();
+    flash();
+    showExtension();
+}
+
+function finalizePlayer(soldTo, price) {
+    const overlay = document.getElementById('sold-overlay');
+    const pName = document.getElementById('sold-player-name');
+    const pDet = document.getElementById('sold-details');
+    
+    pName.innerText = fullPlayers[state.idx].name;
+    pDet.innerText = soldTo === "None" ? "UNSOLD" : `${soldTo} @ ₹${price.toFixed(1)} Cr`;
+    overlay.classList.remove('hidden');
+
+    // PLAY HAMMER SOUND
+    playHammer();
+
+    setTimeout(() => {
+        overlay.classList.add('hidden');
+        if(soldTo === state.team) {
+            state.purse -= price;
+            state.squad.push({ name: fullPlayers[state.idx].name, price: price });
+            renderSquad();
+        }
+        
+        state.idx++;
+        state.bid = 0; 
+        state.bidder = "None"; 
+        state.timer = 20;
+        
+        if(state.idx >= fullPlayers.length) {
+            alert("Auction Complete!");
+            return;
+        }
+        updateUI();
+    }, 4000);
+}
+
+function updateUI() {
+    const p = fullPlayers[state.idx];
+    document.getElementById('p-name').innerText = p.name;
+    document.getElementById('p-role').innerText = p.role;
+    document.getElementById('bid').innerText = state.bid.toFixed(1);
+    document.getElementById('bidder').innerText = state.bidder;
+    document.getElementById('purse').innerText = state.purse.toFixed(1);
+    document.getElementById('progress').innerText = `Player ${state.idx + 1} / ${fullPlayers.length}`;
+    document.getElementById('timer').innerText = state.timer;
+    
+    const btn = document.getElementById('bid-btn');
+    if(!isDisplayMode) {
+        if(state.bidder === state.team) {
+            btn.innerText = "LEADING";
+            btn.classList.add('btn-disabled');
+        } else {
+            btn.innerText = "BID";
+            btn.classList.remove('btn-disabled');
+        }
+    }
+}
+
+function showExtension() {
+    const t = document.getElementById('timer');
+    t.classList.add('time-added');
+    setTimeout(() => t.classList.remove('time-added'), 500);
+}
+
+function renderSquad() {
+    document.getElementById('squad-list').innerHTML = state.squad.map(s => `
+        <div class="bg-slate-800 p-3 rounded-xl border-l-4 border-yellow-500 text-[11px] flex justify-between uppercase">
+            <b>${s.name}</b>
+            <span class="text-yellow-500 font-bold">₹${s.price.toFixed(1)} Cr</span>
+        </div>
+    `).join('');
+}
+
+function saveSquad() {
+    html2canvas(document.getElementById('export-area'), { backgroundColor: '#020617' }).then(canvas => {
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL("image/png");
+        link.download = `${state.team}_Squad_Official.png`;
+        link.click();
+    });
+}
+
+function flash() {
+    const c = document.getElementById('player-card');
+    c.classList.add('bid-flash');
+    setTimeout(() => c.classList.remove('bid-flash'), 300);
+}
+</script>
+</body>
+</html>
